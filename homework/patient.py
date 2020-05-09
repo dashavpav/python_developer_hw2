@@ -16,7 +16,6 @@ def my_log_info(func):
                 self._text_to_logg = None
         return wrapper
 
-
 def my_logging_decorator(func):
     def wrapper(self, *args, **kwargs):
         try:
