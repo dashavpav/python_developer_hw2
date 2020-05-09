@@ -1,9 +1,40 @@
-import os.path
-import os
-import pandas as pd
-import homework.logg as l
+import logg as l
+from mysql.connector import MySQLConnection
+from mySQL_config import read_db_config
 
-class Correct_name():
+db_config = read_db_config()
+mydb = MySQLConnection(**db_config)
+mycursor = mydb.cursor()
+sqlFormula = "INSERT INTO patients (first_name, last_name, datebirth," \
+             " phone_number, passport_type, passport_id) VALUES (%s, %s, %s, %s, %s, %s)"
+
+def my_log_info(func):
+        def wrapper(self, *args, **kwargs):
+            func(self, *args, **kwargs)
+            if  self._text_to_logg!= None:
+                self.logger_new_change.info(self._text_to_logg)
+                self._text_to_logg = None
+        return wrapper
+
+
+def my_logging_decorator(func):
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except ValueError:
+            self.logger_error.error('ValueError')
+            raise
+        except TypeError:
+            self.logger_error.error('TypeError')
+            raise
+        finally:
+            if self._text_to_logg != None:
+                self.logger_new_change.info(self._text_to_logg)
+                self._text_to_logg = None
+    return wrapper
+
+
+class Correctname():
 
     def __get__(self, obj, type = None):
         return obj.__dict__[self.name]
@@ -11,17 +42,14 @@ class Correct_name():
     def __set__(self, obj, value):
         if value is not None:
             if obj._creat:
-               obj.logger_error.error("You can't change the name that has been already written down")
                raise AttributeError()
             else:
                 if isinstance(value, str):
                     if value.isalpha():
                       obj.__dict__[self.name] = value
                     else:
-                        obj.logger_error.error('Name should have only the latter')
                         raise ValueError()
                 else:
-                    obj.logger_error.error('Name should have only the latter')
                     raise TypeError()
 
     def __set_name__(self, owner, name):
@@ -29,21 +57,22 @@ class Correct_name():
 
 class Patient():
 
-    first_name = Correct_name()
-    last_name = Correct_name()
+    first_name = Correctname()
+    last_name = Correctname()
+    _text_to_logg = None
 
-    def __init__(self, f_name=None, l_name=None, b_date=None, phone_from=None, d_type=None, d_id=None):
+    def __init__(self, _f_name=None, _l_name=None, _b_date=None, _phone_from=None, _d_type=None, _d_id=None):
       self.logger_new_change = l.logger_new_change
       self.logger_error = l.logger_error
       self._creat = False
-      self.first_name = f_name
-      self.last_name = l_name
-      self.birth_date = b_date
-      self.phone = phone_from
-      self.document_type = d_type
-      self.document_id = d_id
-      if f_name != None:
-          self.logger_new_change.info(['New patient', self.first_name])
+      self.first_name = _f_name
+      self.last_name = _l_name
+      self.birth_date = _b_date
+      self.phone = _phone_from
+      self.document_type = _d_type
+      self.document_id = _d_id
+      if _f_name != None:
+          self._text_to_logg = 'New Patient'
       self._creat = True
 
     def __str__(self):
@@ -51,8 +80,8 @@ class Patient():
         self.last_name,  self.birth_date, self.phone,  self.document_type, self.document_id)
 
     def __del__(self):
-        l.Error_handler.close()
-        l.New_ChangePat_handler.close()
+        l.error_handler.close()
+        l.new_ChangePat_handler.close()
 
 
     @staticmethod
@@ -60,59 +89,48 @@ class Patient():
         return Patient(*args)
 
     def save(self):
-        column = ['first name', 'last name', 'birthday date', 'phone number', 'document type', 'document id']
-        data_to_save = {'first name': [self.first_name],
-            'last name': [self.last_name], 'birthday date': [self.birth_date], 'phone number': [self.phone],
-                        'document type': [self.document_type], 'document id': [self.document_id]}
-        df = pd.DataFrame(data_to_save, columns = column)
-        df.to_csv('Patients.csv', mode = 'a',encoding = "utf-8", index = False, header= False)
+        date2 = (self.first_name, self.last_name, self.birth_date, self.phone, self.document_type,
+                self.document_id)
+        mycursor.execute(sqlFormula, date2)
+        mydb.commit()
 
 # Условие на тип документа
 
     @property
     def document_type(self):
-        return self.d_type
+        return self._d_type
 
     @document_type.setter
+    @my_log_info
     def document_type(self, value):
-        if value is not None and isinstance(value, str):
-            if all(x.isalpha() or x == ' ' for x in value):
-                value.strip()
-                buf = False
-                if value == 'паспорт' or value == 'Паспорт':
-                    value = 'Паспорт'
-                    buf = True
-                elif value == 'заграничный паспорт' or value == 'Заграничный паспорт':
-                    value = 'Заграничный паспорт'
-                    buf = True
-                elif value == 'водительское удостоверение' or value == 'права' or value == 'Права' \
-                        or value == 'Водительское удостоверение':
-                    value = 'Водительское удостоверение'
-                    buf = True
-                if buf == True:
-                    if self._creat == True:
-                        self.logger_new_change.info(["Document type is changed, the new one is ", value])
-                    self.d_type = value
-                else:
-                    self.logger_error.error('You should write down only your passport')
-                    raise ValueError()
+        if isinstance(value, str):
+            value.strip()
+            versions = ['Паспорт', 'паспорт', 'заграничный паспорт', 'Заграничный паспорт', 'Водительское удостоверение', 'водительское удостоверение']
+            if value in versions:
+                for x in versions:
+                    if value == x:
+                        value = x.capitalize()
+                        break
+                if self._creat == True:
+                    self._text_to_logg = 'Document type is changed'
+                self._d_type = value
             else:
-                self.logger_error.error("Your doc type is incorrect")
-                raise TypeError()
+                raise ValueError()
+
         else:
-            self.logger_error.error("You didn't write down your document type")
             raise TypeError()
 
 # Условие на номер телфона
 
     @property
     def phone(self):
-        return self.phone_from
+        return self._phone_from
 
     @phone.setter
+    @my_log_info
     def phone(self, value):
       if value is not None and isinstance(value, str):
-        if all(x.isdigit() or x == ')' or x == '(' or x == '+' or x == '-' or x == ' ' for x in value):
+        if all(x.isdigit() or (x in "()+- ") for x in value):
             buf = []
             for x in value:
                 if x.isdigit():
@@ -127,28 +145,25 @@ class Patient():
                final_str = ''
                value = final_str.join(buf)
                if self._creat == True:
-                   self.logger_new_change.info(["Phone number is changed, the new one is ", value])
-               self.phone_from = value
+                   self._text_to_logg = 'Phone number is changed'
+               self._phone_from = value
             else:
-                self.logger_error.error(["The number is too long", value])
                 raise ValueError()
         else:
-            self.logger_error.error(["It's incorrect number type. Please, try again", value])
             raise ValueError()
       else:
-          self.logger_error.error("You didn't write down your number phone")
           raise TypeError()
 
 
 # Условие на документ
     @property
     def document_id(self):
-        return self.d_id
+        return self._d_id
 
     @document_id.setter
+    @my_log_info
     def document_id(self, value):
       if value is not None and isinstance(value, str):
-        flag = False
         if all(x.isdigit() or x == ' ' or x =='/' or x == '-' for x in value):
             buf = []
             for x in value:
@@ -175,22 +190,21 @@ class Patient():
                 raise ValueError()
             if flag == True:
                 if self._creat == True:
-                    self.logger_new_change.info(["Document id is changed, the new one is ", value])
-                self.d_id = value
+                    self._text_to_logg = 'Phone id is changed'
+                self._d_id = value
         else:
-            self.logger_error.error("Incorrect passport_id")
             raise ValueError()
       else:
-          self.logger_error.error("You didn't write down your document id")
           raise TypeError()
 
 # Условие на дату рождения
 
     @property
     def birth_date(self):
-        return self.b_date
+        return self._b_date
 
     @birth_date.setter
+    @my_log_info
     def birth_date(self, value):
         if value is not None and isinstance(value, str):
             if all(x.isalnum() or x == '.' or x == ' ' or x == '-' for x in value): # Состоит ли строка только из цифр/ букв и . -
@@ -204,65 +218,67 @@ class Patient():
                 # Проверка на корректность входных данных
                 if len(buf) == 3:
                     if not buf[0].isdigit() and not buf[2].isdigit():
-                        self.logger_error.error(["Incorrect birth date", value])
                         raise ValueError()
                     month = ['Janury', 'Febrary', 'March', 'April', 'May', 'June', 'July', 'August', "September",
                              'October','November', 'December']
                     if 1 <= int(buf[0]) <= 31 and (buf[1].isdigit() or buf[1] in month) and 1800 <= int(buf[2]) <= 2020:
                         if buf[1].isdigit():
                             if 1 >= int(buf[1]) >= 12:
-                                self.logger_error.error(["Incorrect birth date, month couldn't be more than 12", value])
                                 raise ValueError()
                             buf.reverse()
                         final_str = '-'
                         value = final_str.join(buf)
                         if self._creat == True:
-                            self.logger_new_change.info(["Birth date is changed, the new one is ", value])
-                        self.b_date = value
+                            self._text_to_logg = 'Birth date is changed'
+                        self._b_date = value
                     elif 1800 <= int(buf[0]) <= 2020 and (buf[1].isdigit() or buf[1] in month) \
                             and 1 <= int(buf[2]) <= 31:
                         if buf[1].isdigit():
                             if 1 >= int(buf[1]) >= 12:
-                                self.logger_error.error(["Incorrect birth date, month couldn't be more than 12", value])
                                 raise ValueError()
                         final_str = '-'
                         value = final_str.join(buf)
                         if self._creat == True:
-                            self.logger_new_change.info(["Birth date is changed, the new one is ", value])
-                        self.b_date = value
+                            self._text_to_logg = 'Birth date is changed'
+                        self._b_date = value
                     else:
-                        self.logger_error.error("Yoy birth date is incorrect")
                         raise ValueError()
                 else:
-                    self.logger_error.error("Yoy birth date is incorrect")
                     raise ValueError()
             else:
-                self.logger_error.error("Yoy birth date is incorrect")
                 raise ValueError()
         else:
-            self.logger_error.error("You didn't write down your birthday")
             raise TypeError()
 
 class PatientCollection():
-    def __init__(self, path_to_file):
-        self._path_to_file = path_to_file
-        if os.path.exists(self._path_to_file) == False:
-            raise ValueError()
+
+    def __init__(self):
+        pass
 
     def __iter__(self):
-        with open(self._path_to_file, 'r', encoding='utf-8') as filehandle:
-            for line in filehandle:
-                line = line.replace('\n', '')
-                line = line.split(',')
-                yield Patient(*line)
+        mycursor.execute("SELECT * FROM patients")
+        pats = mycursor.fetchone()
+        if pats == None:
+            return 0
+        while pats is not None:
+            yield Patient(*pats)
+            pats = mycursor.fetchone()
 
     def limit(self, range):
-        with open(self._path_to_file, 'r', encoding='utf-8') as filehandle:
-            count = 1
-            for line in filehandle:
-                line = line.replace('\n', '')
-                line = line.split(',')
-                if count <= range:
-                    yield Patient(*line)
+        mycursor.execute("SELECT * FROM patients")
+        count = 0
+        while count is not range:
+            pats = self._mycursor.fetchone()
+            if pats is not None:
+                yield Patient(*pats)
                 count += 1
+            else:
+                if count == 0:
+                    print("В БД нет ни одного пациента")
+                    return 0
+                else:
+                    print("Пациентов меньше чем ", range)
+                break
 
+mycursor.close()
+mydb.close()
